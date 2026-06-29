@@ -136,6 +136,7 @@ definition(
 	installOnOpen: true,
 	singleInstance: true,
 	oauth: false,
+	menu: "Integrations",
 	importUrl: 'https://raw.githubusercontent.com/fieldsjm/Hubitat-2/master/WyzeHub/apps/wyzehub-app.groovy'
 )
 
