@@ -31,6 +31,8 @@
  * ===================================================================================
  * 
  * Release Notes:
+ *   v1.8 - Add configurable periodic token refresh to prevent expired
+ *          Device Management API tokens.
  *   v1.7 - Device Management API for newer cameras (Cam OG, etc).
  *        - Fix async callback error handling.
  *        - Camera group switch state tracking.
@@ -57,7 +59,7 @@ import groovy.transform.Field
 import java.security.MessageDigest
 import static java.util.UUID.randomUUID
 
-public static final String version() { return "v1.7" }
+public static final String version() { return "v1.8" }
 
 public static final String apiAppName() { return "com.hualai" }
 public static final String apiAppVersion() { return "2.19.14" }
@@ -201,6 +203,8 @@ def initialize()
 		}
 	}
 
+	scheduleTokenRefresh()
+
 }
 
 def uninstalled() 
@@ -276,6 +280,16 @@ def pageMenu()
 				'0': 'Off',
 			]
 			input name: "logLevel", type: "enum", title: "Log Level", required: true, defaultValue: '4', submitOnChange: true, options: logLevelOptions
+
+			tokenRefreshOptions = [
+				'30': 'Every 30 Minutes',
+				'60': 'Every 1 Hour',
+				'180': 'Every 3 Hours',
+				'360': 'Every 6 Hours',
+				'720': 'Every 12 Hours',
+				'0': 'Disabled',
+			]
+			input name: "tokenRefreshInterval", type: "enum", title: "Token Refresh Interval", required: true, defaultValue: '360', submitOnChange: true, options: tokenRefreshOptions
 
 		}       
       	displayFooter()
@@ -1175,6 +1189,10 @@ private Boolean validateAsyncApiResponse(response) {
 
 	if (response.hasError()) {
 		logError("Async API response has error: status=${response.status}, errorMessage=${response.getErrorMessage()}")
+		if (response.status == 401) {
+			logError("Access Token expired (HTTP 401). Attempting to refresh token.")
+			refreshAccessToken()
+		}
 		return false
 	}
 
@@ -1215,8 +1233,50 @@ private Boolean validateAsyncApiResponse(response) {
 	return true
 }
 
+private scheduleTokenRefresh() {
+	unschedule('scheduledTokenRefresh')
+	String interval = settings.tokenRefreshInterval ?: '360'
+	switch (interval) {
+		case '30':
+			runEvery30Minutes('scheduledTokenRefresh')
+			logInfo('Token refresh scheduled every 30 minutes')
+			break
+		case '60':
+			runEvery1Hour('scheduledTokenRefresh')
+			logInfo('Token refresh scheduled every 1 hour')
+			break
+		case '180':
+			runEvery3Hours('scheduledTokenRefresh')
+			logInfo('Token refresh scheduled every 3 hours')
+			break
+		case '360':
+			schedule("0 0 */6 ? * *", 'scheduledTokenRefresh')
+			logInfo('Token refresh scheduled every 6 hours')
+			break
+		case '720':
+			schedule("0 0 */12 ? * *", 'scheduledTokenRefresh')
+			logInfo('Token refresh scheduled every 12 hours')
+			break
+		default:
+			logInfo('Periodic token refresh disabled')
+			break
+	}
+}
+
+def scheduledTokenRefresh() {
+	logInfo('Running scheduled token refresh')
+	refreshAccessToken()
+}
+
 private refreshAccessToken(Closure closure = {}) {
 	logDebug('refreshAccessToken()')
+
+	if (state.refreshingToken) {
+		logDebug('Token refresh already in progress. Skipping.')
+		return
+	}
+
+	state.refreshingToken = true
 
 	requestBody = wyzeRequestBody() + [
 		'sv': 'd91914dd28b7492ab9dd17f7707d35a3',
@@ -1224,12 +1284,16 @@ private refreshAccessToken(Closure closure = {}) {
 	]
 	requestBody['access_token'] = null
 
-	apiPost('/app/user/refresh_token', requestBody) { response ->
-		logDebug("refreshToken Resposne:")
-		logDebug(response.data)
-		state.access_token = response.data.access_token
-		state.refresh_token = response.data.refresh_token
-		closure(response)
+	try {
+		apiPost('/app/user/refresh_token', requestBody) { response ->
+			logDebug("refreshToken Resposne:")
+			logDebug(response.data)
+			state.access_token = response.data.access_token
+			state.refresh_token = response.data.refresh_token
+			closure(response)
+		}
+	} finally {
+		state.refreshingToken = false
 	}
 }
 

@@ -1,11 +1,11 @@
 {
   "packageName": "WyzeHub",
   "author": "Jake Lehner",
-  "version": "1.7",
+  "version": "1.8",
   "minimumHEVersion": "2.3",
-  "dateReleased": "2023-08-22",
+  "dateReleased": "2026-02-12",
   "communityLink": "https://community.hubitat.com/t/79504",
-  "releaseNotes": "v1.7 - Add Device Management API support for newer cameras (Cam OG, OG Telephoto, Doorbell Pro). Fix async callback error handling. Add camera group switch state tracking (allOn/allOff). Improve auth settings page with API key instructions. Consolidate polling intervals.\n*v1.6 - Add Color Bulb group 12\n*v1.5 - Bug Fix: validateAPI and refreshToken update\n*v1.4 - Added API Key requirement for authentication. (Modified by @fieldsjm)\n*v1.3 - Refresh token logic bug update.\n- Add Light Strip Support (non-pro)\n*v1.2 - Bugfix allowing Meshlight to be used with rules engine (thanks @bruderbell!)\n- Add Camera Event Recording Enable/Disable (thanks @fieldsjm!)\n*v1.1 - Add Camera Driver (thanks @fieldsjm!)\n- Add Outdoor Plug\n- Hubitat Package Manager\n*v1.0 - Initial Release.\n- Support for Color Bulbs, Plugs, and associated groups.",
+  "releaseNotes": "v1.8 - Add configurable periodic token refresh to prevent expired Device Management API tokens.\n*v1.7 - Add Device Management API support for newer cameras (Cam OG, OG Telephoto, Doorbell Pro). Fix async callback error handling. Add camera group switch state tracking (allOn/allOff). Improve auth settings page with API key instructions. Consolidate polling intervals.\n*v1.6 - Add Color Bulb group 12\n*v1.5 - Bug Fix: validateAPI and refreshToken update\n*v1.4 - Added API Key requirement for authentication. (Modified by @fieldsjm)\n*v1.3 - Refresh token logic bug update.\n- Add Light Strip Support (non-pro)\n*v1.2 - Bugfix allowing Meshlight to be used with rules engine (thanks @bruderbell!)\n- Add Camera Event Recording Enable/Disable (thanks @fieldsjm!)\n*v1.1 - Add Camera Driver (thanks @fieldsjm!)\n- Add Outdoor Plug\n- Hubitat Package Manager\n*v1.0 - Initial Release.\n- Support for Color Bulbs, Plugs, and associated groups.",
   "apps": [
     {
       "id": "0402fbff-3546-419f-ac3e-780778fcae0c",
