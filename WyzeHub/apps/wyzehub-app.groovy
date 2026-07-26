@@ -31,6 +31,7 @@
  * ===================================================================================
  * 
  * Release Notes:
+ *   v1.9 - Add optional camera-group mute switch (App Options, default off).
  *   v1.8 - Add configurable periodic token refresh to prevent expired
  *          Device Management API tokens.
  *   v1.7 - Device Management API for newer cameras (Cam OG, etc).
@@ -59,7 +60,7 @@ import groovy.transform.Field
 import java.security.MessageDigest
 import static java.util.UUID.randomUUID
 
-public static final String version() { return "v1.8" }
+public static final String version() { return "v1.9" }
 
 public static final String apiAppName() { return "com.hualai" }
 public static final String apiAppVersion() { return "2.19.14" }
@@ -205,6 +206,25 @@ def initialize()
 
 	scheduleTokenRefresh()
 
+	syncCameraGroupNotificationSwitches()
+}
+
+// initialize() runs on every pageMenu() render, i.e. every time the app UI is
+// opened -- so this must stay cheap. It pushes a boolean and nothing else. An
+// earlier version called child.refresh() here, which re-polled every camera in
+// every group just by viewing the app page.
+private void syncCameraGroupNotificationSwitches() {
+	Boolean enabled = (settings.createNotificationSwitch == true)
+
+	getChildDevices().each { child ->
+		// Check for the exact method being called, not a proxy for it. A standalone
+		// camera is also an app child and also declares setAllNotifications, so
+		// testing that instead would call this on a camera, which does not define
+		// it. Bulb/plug groups and older camera-group drivers are skipped too.
+		if (child.hasCommand('setNotificationSwitchEnabled')) {
+			child.setNotificationSwitchEnabled(enabled)
+		}
+	}
 }
 
 def uninstalled() 
@@ -290,6 +310,10 @@ def pageMenu()
 				'0': 'Disabled',
 			]
 			input name: "tokenRefreshInterval", type: "enum", title: "Token Refresh Interval", required: true, defaultValue: '360', submitOnChange: true, options: tokenRefreshOptions
+
+			input name: "createNotificationSwitch", type: "bool", title: "Add a mute switch to camera groups",
+				required: false, defaultValue: false
+			paragraph "Adds a <b>&lt;group name&gt; Notifications</b> virtual switch beside each camera group that can be used in dashboards, automations and voice control."
 
 		}       
       	displayFooter()

@@ -32,13 +32,16 @@
  *   v1.5 - Polling for event detection (motion, sound, smoke alarm, co alarm)
  *   v1.4 - Floodlight support added
  *   v1.2 - Event Recording Enable/Disable
- *   v1.1 - Initial Driver Release. 
+ *   v1.1 - Initial Driver Release.
  *        - Support for Power On/Off, Notification Preferences
+ *
+ *   v1.8 - Notify the parent camera group when notifications_enabled changes, so the
+ *          group's notification roll-up tracks it without waiting for the next poll.
  */
 
 import groovy.transform.Field
 
-public static String version() {  return "v1.7"  }
+public static String version() {  return "v1.8"  }
 
 public String deviceModel() { return device.getDataValue('product_model') ?: 'WYZEC1-JZ' }
 
@@ -355,6 +358,9 @@ void createDeviceEventsFromPropertyList(List propertyList) {
 				if (device.currentValue(eventName) != eventValue) {
                     logDebug("Updating Property ${eventName} to ${eventValue}")
 					app.doSendDeviceEvent(device, eventName, eventValue, eventUnit)
+					// The group rolls this up into notificationsOn and its Notifications
+					// child switch, exactly as it does for power below.
+					notifyParentGroup()
 				}
             break
             

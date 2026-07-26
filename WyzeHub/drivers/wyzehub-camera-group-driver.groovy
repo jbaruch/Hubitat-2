@@ -28,11 +28,22 @@
  * 3. Code is provided with no warranty. Using somebody else's code and bitching when it goes wrong makes
  *    you a DONKEY dick. Fix the problem yourself. A non-dick would submit the fix back.
  *
+ * ===================================================================================
+ *
+ * Release Notes:
+ *   v1.8 - Add group-level notification control as a separate child switch.
+ *          on()/off() still control camera power, unchanged.
+ *          Opt-in via "Add a mute switch to camera groups" in the app's App
+ *          Options, default off. Needs app v1.9 or later.
+ *
  */
 
 import groovy.transform.Field
 
-public static String version() {  return "v1.7"  }
+public static String version() {  return "v1.8"  }
+
+// Child switch that exposes notification mute/unmute for the whole group.
+@Field static final String notifyChildSuffix = '-notifications' 
 
 public String deviceModel() { return '' }
 
@@ -51,11 +62,27 @@ metadata {
 
 		attribute "allOn", "enum", ["true", "false"]
 		attribute "allOff", "enum", ["true", "false"]
+		attribute "notificationsOn", "enum", ["true", "false"]
 
 		command "updateGroupState", [[
 			"name":"Description",
-			"description":"Recalculate group switch, allOn, and allOff states from current child camera states",
+			"description":"Recalculate group switch, allOn, allOff, and notificationsOn states from current child camera states",
 			"type":"STRING"
+		]]
+		// Declared so the app can verify this exact method exists via hasCommand()
+		// before calling it. hasCommand() only sees declared commands, so an
+		// undeclared method could only be checked by proxy.
+		command "setNotificationSwitchEnabled", [[
+			"name":"Enabled*",
+			"description":"Set by the WyzeHub app from its \"Add a mute switch to camera groups\" option. Controls whether this group owns a Notifications child switch.",
+			"type":"ENUM",
+			"constraints":["true","false"]
+		]]
+		command "setAllNotifications", [[
+			"name":"Enable*",
+			"description":"Enable or disable push notifications on every camera in the group. Same as toggling the group's Notifications child switch. Does NOT power cameras on or off.",
+			"type":"ENUM",
+			"constraints":["true","false"]
 		]]
     }
 
@@ -74,7 +101,9 @@ void installed() {
 	sendEvent(name: 'switch', value: 'off')
 	sendEvent(name: 'allOn', value: 'false')
 	sendEvent(name: 'allOff', value: 'true')
+	sendEvent(name: 'notificationsOn', value: 'false')
 
+	ensureNotificationDevice()
 	refresh()
 	initialize()
 }
@@ -82,6 +111,7 @@ void installed() {
 void updated() {
     app = getApp()
 	logDebug("updated()")
+	ensureNotificationDevice()
 	updateGroupState()
     initialize()
 }
@@ -97,31 +127,137 @@ void parse(String description) {
 }
 
 def refresh() {
-	getChildDevices().each { childDevice ->
+	// Idempotent, and self-heals the child if it was deleted by hand.
+	ensureNotificationDevice()
+	getCameraDevices().each { childDevice ->
 		childDevice.settingsRefresh()
 		childDevice.refresh()
 	}
 	runIn(15, 'updateGroupState')
 }
 
+// on()/off() are camera POWER, unchanged. Notifications are the child switch below.
 def on() {
-	getChildDevices().each { childDevice ->
+	getCameraDevices().each { childDevice ->
 		childDevice.on()
 	}
 	runIn(10, 'updateGroupState')
 }
 
 def off() {
-	getChildDevices().each { childDevice ->
+	getCameraDevices().each { childDevice ->
 		childDevice.off()
 	}
 	runIn(10, 'updateGroupState')
 }
 
+def setAllNotifications(enable) {
+	String value = (enable?.toString() == 'true') ? 'true' : 'false'
+	logInfo("Setting notifications to ${value} on all cameras in the group")
+
+	getCameraDevices().each { childDevice ->
+		childDevice.setAllNotifications(value)
+	}
+	// Each camera re-reads its own settings ~10s after the set; recheck after that.
+	runIn(20, 'updateGroupState')
+}
+
+//  ---------------------------
+// | Notification child switch |
+//  ---------------------------
+
+void componentOn(childDevice) {
+	logDebug("componentOn() from ${childDevice?.displayName}")
+	setAllNotifications('true')
+}
+
+void componentOff(childDevice) {
+	logDebug("componentOff() from ${childDevice?.displayName}")
+	setAllNotifications('false')
+}
+
+void componentRefresh(childDevice) {
+	logDebug("componentRefresh() from ${childDevice?.displayName}")
+	// Recalculate the roll-up only. Deliberately NOT a full refresh(): the child's
+	// own installed() fires refresh(), which would land back here and re-poll every
+	// camera a second time. Poll the cameras from the group device instead.
+	updateGroupState()
+}
+
+// The group's own children are the cameras plus, optionally, the notification
+// switch. Every fan-out must exclude the latter or it gets sent camera commands.
+private getCameraDevices() {
+	return getChildDevices().findAll { it.deviceNetworkId != notifyChildNetworkId() }
+}
+
+private String notifyChildNetworkId() {
+	return "${device.deviceNetworkId}${notifyChildSuffix}"
+}
+
+private getNotificationDevice() {
+	return getChildDevice(notifyChildNetworkId())
+}
+
+// Pushed by the app from "Add a mute switch to camera groups" in App Options.
+// The app pushes rather than the driver pulling, because a driver calling an app
+// method the installed app version does not define throws MissingMethodException
+// -- and ?. does not guard that, only null -- which would break installed(),
+// updated() and refresh() on this driver for anyone who updates the drivers
+// before the app.
+void setNotificationSwitchEnabled(enabled) {
+	Boolean wanted = (enabled?.toString() == 'true')
+	Boolean previous = (state.notificationSwitchEnabled == true)
+	state.notificationSwitchEnabled = wanted
+
+	if (wanted) {
+		Boolean existed = (getNotificationDevice() != null)
+		ensureNotificationDevice()
+		if (!existed && getNotificationDevice()) {
+			// A new component switch starts at the driver default, which need not
+			// match the cameras. Nothing else will correct it: the app pushes this
+			// flag without refreshing, so sync it here or it stays wrong until the
+			// next unrelated updateGroupState().
+			updateGroupState()
+		}
+	} else if (previous) {
+		def child = getNotificationDevice()
+		if (child) {
+			// Deliberately not deleted: rules or dashboards may already point at it,
+			// and it keeps working. Remove it by hand if it is genuinely unwanted.
+			logWarn("The mute switch option is off, but '${child.displayName}' still exists and still works. Delete it by hand if you no longer want it.")
+		}
+	}
+}
+
+private ensureNotificationDevice() {
+	// Opt-in, default off, so nobody gets an unexpected device on upgrade.
+	if (state.notificationSwitchEnabled != true) {
+		return null
+	}
+
+	def child = getNotificationDevice()
+	if (child) {
+		return child
+	}
+
+	child = addChildDevice(
+		'hubitat',
+		'Generic Component Switch',
+		notifyChildNetworkId(),
+		[
+			name: 'Camera Group Notifications',
+			label: "${device.label ?: device.name} Notifications",
+			isComponent: true
+		]
+	)
+	logInfo("Created notification switch '${child.displayName}'")
+	return child
+}
+
 void updateGroupState() {
 	logDebug("updateGroupState()")
 
-	def children = getChildDevices()
+	def children = getCameraDevices()
 	if (!children) {
 		logDebug("No child devices found")
 		return
@@ -151,6 +287,41 @@ void updateGroupState() {
 	}
 	if (device.currentValue("switch") != switchValue) {
 		sendEvent(name: "switch", value: switchValue, descriptionText: "${device.displayName} switch is ${switchValue}")
+	}
+
+	updateNotificationState(children, totalCount, switchMode)
+}
+
+// Notifications are tracked on the same any/all rule as the power switch, and
+// mirrored onto the notification child so it reads back like any other switch.
+private void updateNotificationState(children, int totalCount, String switchMode) {
+	int notifyOnCount = children.count { it.currentValue("notifications_enabled") == "true" }
+
+	String notificationsOnValue
+	if (switchMode == "all") {
+		notificationsOnValue = (notifyOnCount == totalCount) ? "true" : "false"
+	} else {
+		notificationsOnValue = (notifyOnCount > 0) ? "true" : "false"
+	}
+
+	logDebug("Notification state: ${notifyOnCount}/${totalCount} enabled, mode=${switchMode}, notificationsOn=${notificationsOnValue}")
+
+	if (device.currentValue("notificationsOn") != notificationsOnValue) {
+		sendEvent(name: "notificationsOn", value: notificationsOnValue, descriptionText: "${device.displayName} notificationsOn is ${notificationsOnValue}")
+	}
+
+	def notifyChild = getNotificationDevice()
+	if (!notifyChild) {
+		return
+	}
+
+	String childSwitch = (notificationsOnValue == "true") ? "on" : "off"
+	if (notifyChild.currentValue("switch") != childSwitch) {
+		notifyChild.parse([[
+			name: "switch",
+			value: childSwitch,
+			descriptionText: "${notifyChild.displayName} switch is ${childSwitch}"
+		]])
 	}
 }
 
