@@ -1,5 +1,5 @@
 /*
- * Import URL: https://raw.githubusercontent.com/jakelehner/Hubitat/master/WyzeHub/drivers/wyzehub-camera-driver.groovy
+ * Import URL: https://raw.githubusercontent.com/jbaruch/Hubitat-2/master/WyzeHub/drivers/wyzehub-camera-driver.groovy
  *
  * DON'T BE A DICK PUBLIC LICENSE
  *
@@ -32,13 +32,22 @@
  *   v1.5 - Polling for event detection (motion, sound, smoke alarm, co alarm)
  *   v1.4 - Floodlight support added
  *   v1.2 - Event Recording Enable/Disable
- *   v1.1 - Initial Driver Release. 
+ *   v1.1 - Initial Driver Release.
  *        - Support for Power On/Off, Notification Preferences
+ *
+ * ===================================================================================
+ *
+ * Fork: github.com/jbaruch/Hubitat-2 (from fieldsjm/Hubitat-2)
+ *
+ *   v1.8-notify - Notify the parent camera group when notifications_enabled changes,
+ *                 so the group's notification-driven switch tracks it without waiting
+ *                 for the next poll. Pairs with wyzehub-camera-group-driver.groovy
+ *                 v1.8-notify, where the group switch means notifications, not power.
  */
 
 import groovy.transform.Field
 
-public static String version() {  return "v1.7"  }
+public static String version() {  return "v1.8-notify"  }
 
 public String deviceModel() { return device.getDataValue('product_model') ?: 'WYZEC1-JZ' }
 
@@ -98,7 +107,7 @@ metadata {
 		name: "WyzeHub Camera", 
 		namespace: "jakelehner", 
 		author: "Jake Lehner", 
-		importUrl: "https://raw.githubusercontent.com/fieldsjm/Hubitat-2/master/WyzeHub/drivers/wyzehub-camera-driver.groovy"
+		importUrl: "https://raw.githubusercontent.com/jbaruch/Hubitat-2/master/WyzeHub/drivers/wyzehub-camera-driver.groovy"
 	) {
 		capability "CarbonMonoxideDetector"
         capability "MotionSensor"
@@ -355,6 +364,8 @@ void createDeviceEventsFromPropertyList(List propertyList) {
 				if (device.currentValue(eventName) != eventValue) {
                     logDebug("Updating Property ${eventName} to ${eventValue}")
 					app.doSendDeviceEvent(device, eventName, eventValue, eventUnit)
+					// The camera group's switch is derived from this attribute, not from power.
+					notifyParentGroup()
 				}
             break
             
