@@ -94,3 +94,8 @@ forked drivers, read the result before importing.
 The workflow rewrites `master` history on purpose. That is inherent to keeping a divergent fork
 rebased rather than merged; `--force-with-lease` means a concurrent push fails the job instead of
 being clobbered.
+
+> **Issues must stay enabled on this repo.** GitHub disables issues on forks by default, and both
+> alerting paths above are `gh issue create`. With issues off, the sync still rebases and pushes but
+> loses every warning — silently, and exactly when something needs attention. Enable with
+> `gh repo edit <owner>/<repo> --enable-issues`.
