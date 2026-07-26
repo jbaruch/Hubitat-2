@@ -14,35 +14,46 @@ This repo holds Apps and Device for the Hubitat platform. It started due to a se
 ## Fork changes
 
 This is a fork of [fieldsjm/Hubitat-2](https://github.com/fieldsjm/Hubitat-2) (itself a fork of
-[jakelehner/Hubitat](https://github.com/jakelehner/Hubitat)), maintained for one hub. It carries a
-deliberate behavioural divergence from upstream.
+[jakelehner/Hubitat](https://github.com/jakelehner/Hubitat)). It adds **group-level notification
+control** to the WyzeHub camera group.
 
-**The camera group's switch means notifications, not camera power.**
+**The problem.** Muting cameras and powering them off are different things, but the camera group only
+exposes power. `WyzeHub Camera Group`'s `on()` / `off()` fan out `childDevice.on()` / `off()`, and the
+per-camera notification commands that already exist (`setAllNotifications`, `setMotionNotification`,
+`setSoundNotification`) have no group-level equivalent at all. So "mute the cameras while we're home"
+has no lever — and reaching for the obvious one silently powers the cameras down, which stops motion
+detection and event recording entirely.
 
-Upstream, `WyzeHub Camera Group`'s `on()` / `off()` fan out `childDevice.on()` / `off()`, which power
-the cameras up and down. That makes the obvious automation — "mute the cameras while we're home" —
-silently power them off instead, so they stop detecting motion and stop recording events entirely.
-
-In this fork:
+**The fix — a separate toggle, not a redefined one.** The group now creates a
+`<group> Notifications` child switch (`Generic Component Switch`). Turning it on or off fans
+`setAllNotifications` out to every camera in the group. Being a real switch, it works with rules,
+dashboards and voice control exactly like any other.
 
 | | Upstream | This fork |
 |---|---|---|
-| `on()` / `off()` | camera power | `setAllNotifications` on every child |
-| `switch`, `allOn`, `allOff` | derived from children's power | derived from children's `notifications_enabled` |
-| camera power | `on()` / `off()` | `setCameraPower(true\|false)` |
-| power visibility | `switch` | `camerasOn` (`true` / `false` / `partial`) |
-| `notificationsOn` | — | mirrors `switch`, explicitly named |
+| `on()` / `off()` | camera power | camera power — **unchanged** |
+| `switch`, `allOn`, `allOff` | derived from children's power | derived from children's power — **unchanged** |
+| mute all cameras | *not possible* | the `<group> Notifications` child switch |
+| | | `setAllNotifications(true\|false)` command |
+| | | `notificationsOn` attribute (roll-up) |
+
+**`on()` / `off()` deliberately still mean power.** The `Switch` capability was added to these drivers
+on purpose — [jakelehner/Hubitat#7](https://github.com/jakelehner/Hubitat/pull/7), *"Allows cameras to
+easily be controlled by the rule machine"*, and the thread there extends it to camera groups for the
+same reason. Repointing it at notifications would break that for every existing user, silently, on
+update. So notifications got their own switch instead.
+
+This makes the change **purely additive**: nothing that worked before behaves differently. The only
+edits to existing code are four `getChildDevices()` → `getCameraDevices()` calls, so the group's
+fan-outs skip the new notification child rather than sending it camera commands.
 
 `wyzehub-camera-driver.groovy` gets a one-line companion change: it already notified its parent group
-when its power `switch` changed; it now also notifies when `notifications_enabled` changes, so the
-group's notification-derived switch updates immediately instead of on the next 120s poll.
+when its power `switch` changed, and now also notifies when `notifications_enabled` changes, so the
+roll-up updates immediately instead of on the next 120s poll.
 
 Both changed drivers have `importUrl` repointed at this fork, so importing them will not pull
-upstream's version back over the change.
-
-**Migrating from upstream:** if mode rules were previously toggling the group switch, the cameras are
-probably sitting powered off. Nothing here will power them back on — run `setCameraPower` → `true`
-once from the group device page, and check `camerasOn` reads `true`.
+upstream's version back over the change. (That repoint is fork-only and is excluded from anything
+proposed upstream.)
 
 Everything else in this repo is unmodified from upstream.
 
@@ -71,8 +82,8 @@ git config branch.autoSetupRebase always
 ```
 
 If upstream ever touches the two changed drivers, the rebase will conflict there — that is the point.
-Resolve toward keeping the notification behaviour, and re-check that `importUrl` still points at this
-fork afterwards.
+Resolve toward keeping the notification child switch, and re-check that `importUrl` still points at
+this fork afterwards.
 
 #### Automated
 

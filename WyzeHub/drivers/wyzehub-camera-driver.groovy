@@ -40,9 +40,10 @@
  * Fork: github.com/jbaruch/Hubitat-2 (from fieldsjm/Hubitat-2)
  *
  *   v1.8-notify - Notify the parent camera group when notifications_enabled changes,
- *                 so the group's notification-driven switch tracks it without waiting
- *                 for the next poll. Pairs with wyzehub-camera-group-driver.groovy
- *                 v1.8-notify, where the group switch means notifications, not power.
+ *                 the same way power changes already do. The group rolls notification
+ *                 state up into its notificationsOn attribute and its Notifications
+ *                 child switch, and without this it would only refresh on the next
+ *                 poll. Pairs with wyzehub-camera-group-driver.groovy v1.8-notify.
  */
 
 import groovy.transform.Field
@@ -364,7 +365,8 @@ void createDeviceEventsFromPropertyList(List propertyList) {
 				if (device.currentValue(eventName) != eventValue) {
                     logDebug("Updating Property ${eventName} to ${eventValue}")
 					app.doSendDeviceEvent(device, eventName, eventValue, eventUnit)
-					// The camera group's switch is derived from this attribute, not from power.
+					// The group rolls this up into notificationsOn and its Notifications
+					// child switch, exactly as it does for power below.
 					notifyParentGroup()
 				}
             break
