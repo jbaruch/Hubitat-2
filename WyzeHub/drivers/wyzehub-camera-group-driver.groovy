@@ -83,6 +83,15 @@ metadata {
 			"description":"Recalculate group switch, allOn, allOff, and notificationsOn states from current child camera states",
 			"type":"STRING"
 		]]
+		// Declared so the app can verify this exact method exists via hasCommand()
+		// before calling it. hasCommand() only sees declared commands, so an
+		// undeclared method could only be checked by proxy.
+		command "setNotificationSwitchEnabled", [[
+			"name":"Enabled*",
+			"description":"Set by the WyzeHub app from its \"Add a mute switch to camera groups\" option. Controls whether this group owns a Notifications child switch.",
+			"type":"ENUM",
+			"constraints":["true","false"]
+		]]
 		command "setAllNotifications", [[
 			"name":"Enable*",
 			"description":"Enable or disable push notifications on every camera in the group. Same as toggling the group's Notifications child switch. Does NOT power cameras on or off.",
@@ -215,7 +224,15 @@ void setNotificationSwitchEnabled(enabled) {
 	state.notificationSwitchEnabled = wanted
 
 	if (wanted) {
+		Boolean existed = (getNotificationDevice() != null)
 		ensureNotificationDevice()
+		if (!existed && getNotificationDevice()) {
+			// A new component switch starts at the driver default, which need not
+			// match the cameras. Nothing else will correct it: the app pushes this
+			// flag without refreshing, so sync it here or it stays wrong until the
+			// next unrelated updateGroupState().
+			updateGroupState()
+		}
 	} else if (previous) {
 		def child = getNotificationDevice()
 		if (child) {

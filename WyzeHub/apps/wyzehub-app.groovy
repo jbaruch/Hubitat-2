@@ -217,11 +217,11 @@ private void syncCameraGroupNotificationSwitches() {
 	Boolean enabled = (settings.createNotificationSwitch == true)
 
 	getChildDevices().each { child ->
-		// Duck-typed on purpose. setAllNotifications alone is not enough: a
-		// standalone camera is also an app child and also declares it. Requiring
-		// updateGroupState too narrows this to camera groups, and skips bulb/plug
-		// groups and camera groups still on an older driver.
-		if (child.hasCommand('setAllNotifications') && child.hasCommand('updateGroupState')) {
+		// Check for the exact method being called, not a proxy for it. A standalone
+		// camera is also an app child and also declares setAllNotifications, so
+		// testing that instead would call this on a camera, which does not define
+		// it. Bulb/plug groups and older camera-group drivers are skipped too.
+		if (child.hasCommand('setNotificationSwitchEnabled')) {
 			child.setNotificationSwitchEnabled(enabled)
 		}
 	}
