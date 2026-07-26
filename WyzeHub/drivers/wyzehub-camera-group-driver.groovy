@@ -47,6 +47,9 @@
  *                 attribute on the group itself. Purely additive: nothing that
  *                 worked before behaves differently.
  *
+ *                 Opt-in: "Add a mute switch to camera groups" in the WyzeHub app's
+ *                 App Options, default off. Needs app v1.9 or later.
+ *
  */
 
 import groovy.transform.Field
@@ -202,6 +205,19 @@ private getNotificationDevice() {
 
 private ensureNotificationDevice() {
 	def child = getNotificationDevice()
+
+	// Opt-in: "Add a mute switch to camera groups" in the WyzeHub app's App Options,
+	// off by default, so nobody gets an unexpected device on upgrade.
+	app = getApp()
+	if (!app?.notificationSwitchEnabled()) {
+		if (child) {
+			// Deliberately not deleted: rules or dashboards may already point at it,
+			// and it keeps working. Remove it by hand if it is genuinely unwanted.
+			logWarn("The mute switch option is off, but '${child.displayName}' still exists and still works. Delete it by hand if you no longer want it.")
+		}
+		return null
+	}
+
 	if (child) {
 		return child
 	}

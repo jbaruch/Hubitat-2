@@ -1,5 +1,5 @@
 /*
- * Import URL: https://raw.githubusercontent.com/jakelehner/Hubitat/master/WyzeHub/apps/wyzehub-app.groovy
+ * Import URL: https://raw.githubusercontent.com/jbaruch/Hubitat-2/master/WyzeHub/apps/wyzehub-app.groovy
  *
  * DON'T BE A DICK PUBLIC LICENSE
  *
@@ -31,6 +31,7 @@
  * ===================================================================================
  * 
  * Release Notes:
+ *   v1.9 - Add optional camera-group mute switch (App Options, default off).
  *   v1.8 - Add configurable periodic token refresh to prevent expired
  *          Device Management API tokens.
  *   v1.7 - Device Management API for newer cameras (Cam OG, etc).
@@ -59,7 +60,7 @@ import groovy.transform.Field
 import java.security.MessageDigest
 import static java.util.UUID.randomUUID
 
-public static final String version() { return "v1.8" }
+public static final String version() { return "v1.9" }
 
 public static final String apiAppName() { return "com.hualai" }
 public static final String apiAppVersion() { return "2.19.14" }
@@ -205,6 +206,26 @@ def initialize()
 
 	scheduleTokenRefresh()
 
+	// Camera groups read notificationSwitchEnabled() when they refresh, so nudge
+	// them here to pick up a change to the option straight away rather than on
+	// their next poll.
+	syncCameraGroupNotificationSwitches()
+}
+
+// Read by the WyzeHub Camera Group driver to decide whether to own a mute switch.
+Boolean notificationSwitchEnabled() {
+	return settings.createNotificationSwitch == true
+}
+
+private void syncCameraGroupNotificationSwitches() {
+	String cameraGroupDriver = groupDriverMap[1].driver
+
+	getChildDevices().each { child ->
+		if (child.typeName == cameraGroupDriver) {
+			logDebug("Refreshing ${child.displayName} to apply the mute switch option")
+			child.refresh()
+		}
+	}
 }
 
 def uninstalled() 
@@ -290,6 +311,10 @@ def pageMenu()
 				'0': 'Disabled',
 			]
 			input name: "tokenRefreshInterval", type: "enum", title: "Token Refresh Interval", required: true, defaultValue: '360', submitOnChange: true, options: tokenRefreshOptions
+
+			input name: "createNotificationSwitch", type: "bool", title: "Add a mute switch to camera groups",
+				description: "Adds a '&lt;group name&gt; Notifications' child switch to each camera group. Turning it off mutes push notifications on every camera in that group; turning it on unmutes them. Camera power is unaffected \u2014 that stays on the group's own switch. Switching this option back off stops new mute switches being created; any that already exist keep working until you delete them.",
+				required: false, defaultValue: false, submitOnChange: true
 
 		}       
       	displayFooter()
