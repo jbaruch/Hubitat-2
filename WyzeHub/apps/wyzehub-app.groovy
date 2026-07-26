@@ -313,8 +313,12 @@ def pageMenu()
 			input name: "tokenRefreshInterval", type: "enum", title: "Token Refresh Interval", required: true, defaultValue: '360', submitOnChange: true, options: tokenRefreshOptions
 
 			input name: "createNotificationSwitch", type: "bool", title: "Add a mute switch to camera groups",
-				description: "Adds a '&lt;group name&gt; Notifications' child switch to each camera group. Turning it off mutes push notifications on every camera in that group; turning it on unmutes them. Camera power is unaffected - that stays on the group's own switch. Switching this option back off stops new mute switches being created; any that already exist keep working until you delete them.",
 				required: false, defaultValue: false
+			paragraph "<small>Adds a <b>&lt;group name&gt; Notifications</b> switch beside each camera group. " +
+				"Turn <i>that</i> switch off to silence push notifications from every camera in the group, " +
+				"and on to restore them. Camera power is unaffected &mdash; it stays on the group's own switch.<br>" +
+				"Leaving this option off simply means no such switch is created; one that already exists keeps " +
+				"working until you delete it.</small>"
 
 		}       
       	displayFooter()
