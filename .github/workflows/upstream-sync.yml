@@ -1,0 +1,186 @@
+name: Sync with upstream (rebase)
+
+# This fork carries a deliberate divergence from fieldsjm/Hubitat-2 (see README ->
+# Fork changes). Keeping that as a clean commit on top of upstream means rebasing,
+# which rewrites master. That is intentional and is what this workflow automates.
+#
+#   clean rebase    -> force-push master (with lease), job summary
+#   conflict        -> abort, leave master untouched, open/refresh an issue, fail
+#   forked drivers  -> open an issue even on a clean rebase, because importUrl
+#      touched by       points at master and the hub's next Import would otherwise
+#      upstream         pick up unreviewed upstream driver changes
+
+on:
+  schedule:
+    - cron: '0 8 * * 1' # Mondays, 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: https://github.com/fieldsjm/Hubitat-2.git
+  # Files this fork deliberately diverges on. Upstream touching these is the case
+  # that needs a human, whether or not the rebase itself conflicts.
+  FORKED_PATHS: >-
+    WyzeHub/drivers/wyzehub-camera-group-driver.groovy
+    WyzeHub/drivers/wyzehub-camera-driver.groovy
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM"
+          git remote set-url --push upstream DISABLED
+          git fetch upstream master
+
+      - name: Check whether upstream is ahead
+        id: check
+        run: |
+          set -euo pipefail
+          behind=$(git rev-list --count master..upstream/master)
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          if [ "$behind" -eq 0 ]; then
+            echo "Already up to date with upstream." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### Upstream is $behind commit(s) ahead"
+              echo
+              git log --format='- `%h` %s' master..upstream/master
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Computed BEFORE the rebase: afterwards the pre-rebase master is only
+      # reachable through the reflog, which a fresh CI checkout cannot be trusted
+      # to carry.
+      - name: Note whether upstream touched the forked drivers
+        id: forked
+        if: steps.check.outputs.behind != '0'
+        run: |
+          set -euo pipefail
+          # Read into an array rather than relying on unquoted word-splitting, which
+          # is shell-dependent (bash splits, zsh does not).
+          read -r -a forked_paths <<< "$FORKED_PATHS"
+          touched=$(git diff --name-only master...upstream/master -- "${forked_paths[@]}")
+          if [ -n "$touched" ]; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "files<<TOUCHED_EOF"
+              printf '%s\n' "$touched"
+              echo "TOUCHED_EOF"
+            } >> "$GITHUB_OUTPUT"
+            {
+              echo
+              echo "**Upstream modified files this fork diverges on:**"
+              echo
+              printf '%s\n' "$touched" | sed 's/^/- `/; s/$/`/'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rebase our commits onto upstream/master
+        id: rebase
+        if: steps.check.outputs.behind != '0'
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rebase upstream/master; then
+            echo "result=clean" >> "$GITHUB_OUTPUT"
+            echo "Rebase applied cleanly."
+          else
+            git rebase --abort
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+            echo "Rebase conflicted; master left untouched."
+          fi
+
+      - name: Push rebased master
+        if: steps.rebase.outputs.result == 'clean'
+        run: |
+          set -euo pipefail
+          # Lease is against origin/master as fetched at checkout: if anything else
+          # pushed in the meantime this fails instead of clobbering it.
+          git push --force-with-lease origin master
+          {
+            echo
+            echo 'Rebased and force-pushed `master`. History rewritten as intended.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or refresh the conflict issue
+        if: steps.rebase.outputs.result == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: 'Upstream sync: rebase conflict'
+        run: |
+          set -euo pipefail
+          body=$(
+            echo "The scheduled rebase onto \`upstream/master\` conflicted. **\`master\` was not changed.**"
+            echo
+            echo "Upstream commits not yet in this fork:"
+            echo
+            git log --format='- `%h` %s' master..upstream/master
+            echo
+            echo "Resolve locally:"
+            echo
+            echo '```bash'
+            echo "git fetch upstream"
+            echo "git rebase upstream/master   # resolve, keeping the notification behaviour"
+            echo "# re-check importUrl still points at jbaruch/Hubitat-2"
+            echo "git push --force-with-lease origin master"
+            echo '```'
+            echo
+            echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          )
+          gh label create upstream-sync --description "Automated upstream sync" --color ededed --force
+          existing=$(gh issue list --state open --label upstream-sync --json number,title \
+            --jq "map(select(.title == env.TITLE)) | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "Commented on existing issue #$existing."
+          else
+            gh issue create --title "$TITLE" --label upstream-sync --body "$body"
+          fi
+          # Red run is the point: the fork is out of date and needs a human.
+          exit 1
+
+      - name: Flag unreviewed changes to the forked drivers
+        if: steps.rebase.outputs.result == 'clean' && steps.forked.outputs.touched == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Via env, never interpolated into the script body.
+          TOUCHED_FILES: ${{ steps.forked.outputs.files }}
+        run: |
+          set -euo pipefail
+          body=$(
+            echo "The rebase applied cleanly, but upstream modified files this fork deliberately diverges on."
+            echo
+            echo "\`importUrl\` on both changed drivers points at this fork's \`master\`, so the hub's next"
+            echo "**Import** would pull these upstream changes onto the hub without review."
+            echo
+            echo "Files:"
+            echo
+            printf '%s\n' "$TOUCHED_FILES" | sed 's/^/- `/; s/$/`/'
+            echo
+            echo "Check the notification behaviour survived, then redeploy to the hub."
+            echo
+            echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          )
+          gh label create upstream-sync --description "Automated upstream sync" --color ededed --force
+          gh issue create \
+            --title "Upstream changed the forked drivers — review before importing" \
+            --label upstream-sync --body "$body"

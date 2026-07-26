@@ -73,3 +73,24 @@ git config branch.autoSetupRebase always
 If upstream ever touches the two changed drivers, the rebase will conflict there — that is the point.
 Resolve toward keeping the notification behaviour, and re-check that `importUrl` still points at this
 fork afterwards.
+
+#### Automated
+
+[`.github/workflows/upstream-sync.yml`](.github/workflows/upstream-sync.yml) does the same thing
+weekly (Mondays 08:00 UTC, plus a manual **Run workflow** button):
+
+| Outcome | What happens |
+|---|---|
+| Upstream unchanged | Exits quietly |
+| Clean rebase | Force-pushes `master` with `--force-with-lease` |
+| Conflict | Aborts, leaves `master` untouched, opens/refreshes an issue, fails the run |
+| Upstream touched a forked driver | Opens an issue even on a clean rebase |
+
+That last row is the one that matters. `importUrl` points at this fork's `master`, so anything landing
+there reaches the hub on the next **Import**. A clean rebase means git had no textual conflict — not
+that upstream's change is compatible with the notification behaviour. When upstream edits one of the
+forked drivers, read the result before importing.
+
+The workflow rewrites `master` history on purpose. That is inherent to keeping a divergent fork
+rebased rather than merged; `--force-with-lease` means a concurrent push fails the job instead of
+being clobbered.
