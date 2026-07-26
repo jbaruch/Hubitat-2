@@ -314,11 +314,7 @@ def pageMenu()
 
 			input name: "createNotificationSwitch", type: "bool", title: "Add a mute switch to camera groups",
 				required: false, defaultValue: false
-			paragraph "<small>Adds a <b>&lt;group name&gt; Notifications</b> switch beside each camera group. " +
-				"Turn <i>that</i> switch off to silence push notifications from every camera in the group, " +
-				"and on to restore them. Camera power is unaffected &mdash; it stays on the group's own switch.<br>" +
-				"Leaving this option off simply means no such switch is created; one that already exists keeps " +
-				"working until you delete it.</small>"
+			paragraph "Adds a <b>&lt;group name&gt; Notifications</b> virtual switch beside each camera group that can be used in dashboards, automations and voice control."
 
 		}       
       	displayFooter()
