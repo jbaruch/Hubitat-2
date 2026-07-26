@@ -206,24 +206,23 @@ def initialize()
 
 	scheduleTokenRefresh()
 
-	// Camera groups read notificationSwitchEnabled() when they refresh, so nudge
-	// them here to pick up a change to the option straight away rather than on
-	// their next poll.
 	syncCameraGroupNotificationSwitches()
 }
 
-// Read by the WyzeHub Camera Group driver to decide whether to own a mute switch.
-Boolean notificationSwitchEnabled() {
-	return settings.createNotificationSwitch == true
-}
-
+// initialize() runs on every pageMenu() render, i.e. every time the app UI is
+// opened -- so this must stay cheap. It pushes a boolean and nothing else. An
+// earlier version called child.refresh() here, which re-polled every camera in
+// every group just by viewing the app page.
 private void syncCameraGroupNotificationSwitches() {
+	Boolean enabled = (settings.createNotificationSwitch == true)
+
 	getChildDevices().each { child ->
-		// Duck-typed on purpose: matches only groups that actually implement the
-		// mute switch, so bulb/plug groups and older driver versions are skipped.
-		if (child.hasCommand('setAllNotifications')) {
-			logDebug("Refreshing ${child.displayName} to apply the mute switch option")
-			child.refresh()
+		// Duck-typed on purpose. setAllNotifications alone is not enough: a
+		// standalone camera is also an app child and also declares it. Requiring
+		// updateGroupState too narrows this to camera groups, and skips bulb/plug
+		// groups and camera groups still on an older driver.
+		if (child.hasCommand('setAllNotifications') && child.hasCommand('updateGroupState')) {
+			child.setNotificationSwitchEnabled(enabled)
 		}
 	}
 }
