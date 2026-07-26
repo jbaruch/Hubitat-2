@@ -1,5 +1,5 @@
 /*
- * Import URL: https://raw.githubusercontent.com/jakelehner/Hubitat/master/WyzeHub/drivers/wyzehub-camera-group-driver.groovy
+ * Import URL: https://raw.githubusercontent.com/jbaruch/Hubitat-2/master/WyzeHub/drivers/wyzehub-camera-group-driver.groovy
  *
  * DON'T BE A DICK PUBLIC LICENSE
  *
@@ -28,11 +28,30 @@
  * 3. Code is provided with no warranty. Using somebody else's code and bitching when it goes wrong makes
  *    you a DONKEY dick. Fix the problem yourself. A non-dick would submit the fix back.
  *
+ * ===================================================================================
+ *
+ * Fork: github.com/jbaruch/Hubitat-2 (from fieldsjm/Hubitat-2)
+ * The group switch drives NOTIFICATIONS, not camera power.
+ *
+ *   v1.8-notify - on()/off() now call setAllNotifications on every child camera.
+ *                 Camera power moved to the explicit setCameraPower command.
+ *                 switch / allOn / allOff are derived from the children's
+ *                 notifications_enabled attribute instead of their switch state.
+ *                 New attributes: notificationsOn, camerasOn.
+ *                 Pairs with wyzehub-camera-driver.groovy v1.8-notify.
+ *
+ * Why: mode-based rules named "turn camera notifications off" were calling on()/off()
+ * and powering the cameras down instead, which also killed event recording. Cameras
+ * now stay powered and keep recording; only the push notifications get muted.
+ *
+ * Note this deliberately repurposes the Switch capability: on/off is notifications, and
+ * camera power lives in setCameraPower with the camerasOn attribute for observability.
+ *
  */
 
 import groovy.transform.Field
 
-public static String version() {  return "v1.7"  }
+public static String version() {  return "v1.8-notify"  }
 
 public String deviceModel() { return '' }
 
@@ -43,7 +62,7 @@ metadata {
 		name: "WyzeHub Camera Group",
 		namespace: "jakelehner",
 		author: "Jake Lehner",
-		importUrl: "https://raw.githubusercontent.com/fieldsjm/Hubitat-2/master/WyzeHub/drivers/wyzehub-camera-group-driver.groovy"
+		importUrl: "https://raw.githubusercontent.com/jbaruch/Hubitat-2/master/WyzeHub/drivers/wyzehub-camera-group-driver.groovy"
 	) {
 		capability "Outlet"
 		capability "Refresh"
@@ -51,18 +70,26 @@ metadata {
 
 		attribute "allOn", "enum", ["true", "false"]
 		attribute "allOff", "enum", ["true", "false"]
+		attribute "notificationsOn", "enum", ["true", "false"]
+		attribute "camerasOn", "enum", ["true", "false", "partial"]
 
 		command "updateGroupState", [[
 			"name":"Description",
-			"description":"Recalculate group switch, allOn, and allOff states from current child camera states",
+			"description":"Recalculate group switch, allOn, allOff, and camerasOn states from current child camera states",
 			"type":"STRING"
+		]]
+		command "setCameraPower", [[
+			"name":"Power*",
+			"description":"Power every camera in the group on or off. This is NOT the group switch — the switch controls notifications.",
+			"type":"ENUM",
+			"constraints":["true","false"]
 		]]
     }
 
 	preferences {
 		input "SWITCH_MODE", "enum", title: "Switch 'on' when...",
-			description: "Determines when the group switch reports 'on'",
-			options: [["any": "Any camera is on"], ["all": "All cameras are on"]],
+			description: "Determines when the group switch reports 'on'. The switch reflects push notifications, not camera power.",
+			options: [["any": "Any camera has notifications enabled"], ["all": "All cameras have notifications enabled"]],
 			defaultValue: "any", required: true, displayDuringSetup: true
 	}
 }
@@ -74,6 +101,8 @@ void installed() {
 	sendEvent(name: 'switch', value: 'off')
 	sendEvent(name: 'allOn', value: 'false')
 	sendEvent(name: 'allOff', value: 'true')
+	sendEvent(name: 'notificationsOn', value: 'false')
+	sendEvent(name: 'camerasOn', value: 'false')
 
 	refresh()
 	initialize()
@@ -104,16 +133,33 @@ def refresh() {
 	runIn(15, 'updateGroupState')
 }
 
+// The group switch is the NOTIFICATIONS switch. Camera power is setCameraPower().
 def on() {
+	logInfo("Enabling notifications on all cameras in the group")
 	getChildDevices().each { childDevice ->
-		childDevice.on()
+		childDevice.setAllNotifications("true")
 	}
-	runIn(10, 'updateGroupState')
+	runIn(20, 'updateGroupState')
 }
 
 def off() {
+	logInfo("Disabling notifications on all cameras in the group")
 	getChildDevices().each { childDevice ->
-		childDevice.off()
+		childDevice.setAllNotifications("false")
+	}
+	runIn(20, 'updateGroupState')
+}
+
+def setCameraPower(power) {
+	String value = (power?.toString() == "true") ? "true" : "false"
+	logInfo("Setting camera power to ${value} on all cameras in the group")
+
+	getChildDevices().each { childDevice ->
+		if (value == "true") {
+			childDevice.on()
+		} else {
+			childDevice.off()
+		}
 	}
 	runIn(10, 'updateGroupState')
 }
@@ -127,21 +173,32 @@ void updateGroupState() {
 		return
 	}
 
-	int onCount = children.count { it.currentValue("switch") == "on" }
 	int totalCount = children.size()
+	int notifyOnCount = children.count { it.currentValue("notifications_enabled") == "true" }
+	int poweredOnCount = children.count { it.currentValue("switch") == "on" }
 
-	String allOnValue = (onCount == totalCount) ? "true" : "false"
-	String allOffValue = (onCount == 0) ? "true" : "false"
+	String allOnValue = (notifyOnCount == totalCount) ? "true" : "false"
+	String allOffValue = (notifyOnCount == 0) ? "true" : "false"
 
 	String switchMode = settings.SWITCH_MODE ?: "any"
 	String switchValue
 	if (switchMode == "all") {
-		switchValue = (onCount == totalCount) ? "on" : "off"
+		switchValue = (notifyOnCount == totalCount) ? "on" : "off"
 	} else {
-		switchValue = (onCount > 0) ? "on" : "off"
+		switchValue = (notifyOnCount > 0) ? "on" : "off"
+	}
+	String notificationsOnValue = (switchValue == "on") ? "true" : "false"
+
+	String camerasOnValue
+	if (poweredOnCount == totalCount) {
+		camerasOnValue = "true"
+	} else if (poweredOnCount == 0) {
+		camerasOnValue = "false"
+	} else {
+		camerasOnValue = "partial"
 	}
 
-	logDebug("Group state: ${onCount}/${totalCount} on, mode=${switchMode}, switch=${switchValue}, allOn=${allOnValue}, allOff=${allOffValue}")
+	logDebug("Group state: notifications ${notifyOnCount}/${totalCount} on, power ${poweredOnCount}/${totalCount} on, mode=${switchMode}, switch=${switchValue}, allOn=${allOnValue}, allOff=${allOffValue}, camerasOn=${camerasOnValue}")
 
 	if (device.currentValue("allOn") != allOnValue) {
 		sendEvent(name: "allOn", value: allOnValue, descriptionText: "${device.displayName} allOn is ${allOnValue}")
@@ -150,7 +207,13 @@ void updateGroupState() {
 		sendEvent(name: "allOff", value: allOffValue, descriptionText: "${device.displayName} allOff is ${allOffValue}")
 	}
 	if (device.currentValue("switch") != switchValue) {
-		sendEvent(name: "switch", value: switchValue, descriptionText: "${device.displayName} switch is ${switchValue}")
+		sendEvent(name: "switch", value: switchValue, descriptionText: "${device.displayName} notifications are ${switchValue}")
+	}
+	if (device.currentValue("notificationsOn") != notificationsOnValue) {
+		sendEvent(name: "notificationsOn", value: notificationsOnValue, descriptionText: "${device.displayName} notificationsOn is ${notificationsOnValue}")
+	}
+	if (device.currentValue("camerasOn") != camerasOnValue) {
+		sendEvent(name: "camerasOn", value: camerasOnValue, descriptionText: "${device.displayName} camerasOn is ${camerasOnValue}")
 	}
 }
 
