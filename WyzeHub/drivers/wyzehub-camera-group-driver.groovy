@@ -80,7 +80,7 @@ metadata {
 
 		command "updateGroupState", [[
 			"name":"Description",
-			"description":"Recalculate group switch, allOn, and allOff states from current child camera states",
+			"description":"Recalculate group switch, allOn, allOff, and notificationsOn states from current child camera states",
 			"type":"STRING"
 		]]
 		command "setAllNotifications", [[
@@ -203,21 +203,36 @@ private getNotificationDevice() {
 	return getChildDevice(notifyChildNetworkId())
 }
 
-private ensureNotificationDevice() {
-	def child = getNotificationDevice()
+// Pushed by the app from "Add a mute switch to camera groups" in App Options.
+// The app pushes rather than the driver pulling, because a driver calling an app
+// method the installed app version does not define throws MissingMethodException
+// -- and ?. does not guard that, only null -- which would break installed(),
+// updated() and refresh() on this driver for anyone who updates the drivers
+// before the app.
+void setNotificationSwitchEnabled(enabled) {
+	Boolean wanted = (enabled?.toString() == 'true')
+	Boolean previous = (state.notificationSwitchEnabled == true)
+	state.notificationSwitchEnabled = wanted
 
-	// Opt-in: "Add a mute switch to camera groups" in the WyzeHub app's App Options,
-	// off by default, so nobody gets an unexpected device on upgrade.
-	app = getApp()
-	if (!app?.notificationSwitchEnabled()) {
+	if (wanted) {
+		ensureNotificationDevice()
+	} else if (previous) {
+		def child = getNotificationDevice()
 		if (child) {
 			// Deliberately not deleted: rules or dashboards may already point at it,
 			// and it keeps working. Remove it by hand if it is genuinely unwanted.
 			logWarn("The mute switch option is off, but '${child.displayName}' still exists and still works. Delete it by hand if you no longer want it.")
 		}
+	}
+}
+
+private ensureNotificationDevice() {
+	// Opt-in, default off, so nobody gets an unexpected device on upgrade.
+	if (state.notificationSwitchEnabled != true) {
 		return null
 	}
 
+	def child = getNotificationDevice()
 	if (child) {
 		return child
 	}
