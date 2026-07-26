@@ -218,10 +218,10 @@ Boolean notificationSwitchEnabled() {
 }
 
 private void syncCameraGroupNotificationSwitches() {
-	String cameraGroupDriver = groupDriverMap[1].driver
-
 	getChildDevices().each { child ->
-		if (child.typeName == cameraGroupDriver) {
+		// Duck-typed on purpose: matches only groups that actually implement the
+		// mute switch, so bulb/plug groups and older driver versions are skipped.
+		if (child.hasCommand('setAllNotifications')) {
 			logDebug("Refreshing ${child.displayName} to apply the mute switch option")
 			child.refresh()
 		}
@@ -313,8 +313,8 @@ def pageMenu()
 			input name: "tokenRefreshInterval", type: "enum", title: "Token Refresh Interval", required: true, defaultValue: '360', submitOnChange: true, options: tokenRefreshOptions
 
 			input name: "createNotificationSwitch", type: "bool", title: "Add a mute switch to camera groups",
-				description: "Adds a '&lt;group name&gt; Notifications' child switch to each camera group. Turning it off mutes push notifications on every camera in that group; turning it on unmutes them. Camera power is unaffected \u2014 that stays on the group's own switch. Switching this option back off stops new mute switches being created; any that already exist keep working until you delete them.",
-				required: false, defaultValue: false, submitOnChange: true
+				description: "Adds a '&lt;group name&gt; Notifications' child switch to each camera group. Turning it off mutes push notifications on every camera in that group; turning it on unmutes them. Camera power is unaffected - that stays on the group's own switch. Switching this option back off stops new mute switches being created; any that already exist keep working until you delete them.",
+				required: false, defaultValue: false
 
 		}       
       	displayFooter()
